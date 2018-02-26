@@ -7,9 +7,13 @@ import {
   Text,
   Animated,
   Easing,
+  NativeModules,
+  findNodeHandle,
 } from 'react-native';
 import _ from 'lodash';
 import PropTypes from 'prop-types';
+
+const { UIManager } = NativeModules;
 
 class Marquee extends Component {
     until(test, iterator, callback) {
@@ -28,6 +32,7 @@ class Marquee extends Component {
       super(props);
       this.state = {
         list: this.props.children.split(''),
+        contentFits: false,
       };
       this.left1 = new Animated.Value(0),
       this.left2 = new Animated.Value(0),
@@ -72,6 +77,8 @@ class Marquee extends Component {
       }
     }
     onLayoutContainer = (e) => {
+      this.calculateMetrics()
+
       if (!this.width) {
         this.width = e.nativeEvent.layout.width;
         this.spaceWidth = this.props.spaceRatio * this.width;
@@ -79,6 +86,33 @@ class Marquee extends Component {
         this.left2.setValue(this.width);
       }
     }
+
+    async calculateMetrics() {
+      try {
+        const measureWidth = node =>
+          new Promise(resolve => {
+            UIManager.measure(findNodeHandle(node), (x, y, w) => {
+              // console.log('Width: ' + w);
+              return resolve(w);
+            });
+          });
+
+        const [containerWidth, textWidth] = await Promise.all([
+          measureWidth(this.containerRef),
+          measureWidth(this.textRef),
+        ]);
+
+        this.distance = textWidth - containerWidth;
+        this.setState({
+          contentFits: !(this.distance > 0),
+        })
+        return [];
+        // console.log(`distance: ${this.distance}, contentFits: ${this.contentFits}`);
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
     startMoveFirstLabelHead() {
       const {width, twidth, props, left1} = this;
       const {speed} = props;
@@ -150,23 +184,62 @@ class Marquee extends Component {
       });
     }
     render() {
-      const { list } = this.state;
+      const { list, contentFits } = this.state;
       const s = StyleSheet.flatten(this.props.style);
       const textStyleKeys = ['color', 'fontSize', 'fontWeight', 'letterSpacing', 'fontStyle', 'lineHeight', 'fontFamily', 'textDecorationLine'];
       const textStyle = _.pick(s, textStyleKeys);
       const containerStyle = _.omit(s, textStyleKeys);
       return (
-        <View style={[containerStyle, {flexDirection: 'row'}]} onLayout={this.onLayoutContainer}>
-          <Animated.View style={{flexDirection: 'row', transform: [{ translateX: this.left1 }], width: null }}>
-            {list.map((o, i)=>(<Text key={i} onLayout={ (e) => this.onLayout(i, e)} style={textStyle}>{o}</Text>))}
-          </Animated.View>
-          <Animated.View style={{flexDirection: 'row', position: 'absolute', transform: [{ translateX: this.left2 }], width: null}}>
-            {list.map((o, i)=>(<Text key={i} style={textStyle}>{o}</Text>))}
-          </Animated.View>
+        <View
+          ref={c => (this.containerRef = c)}
+          style={[styles.container, !contentFits && styles.textAlignFromStart]}>
+            <View
+              style={[containerStyle, { flexDirection: 'row' }]}
+              onLayout={this.onLayoutContainer}
+            >
+              <Animated.View
+                ref={c => (this.textRef = c)}
+                style={[styles.textContainer, { transform: [{ translateX: contentFits ? 0 : this.left1 } ] }]}
+              >
+                {list.map((o, i)=>(<Text key={i} onLayout={ (e) => this.onLayout(i, e)} style={textStyle}>{o}</Text>))}
+              </Animated.View>
+
+              {!contentFits &&
+                <Animated.View
+                  style={[styles.textContainerTail, { transform: [{ translateX: this.left2 }] }]}
+                >
+                  {list.map((o, i)=>(<Text key={i} style={textStyle}>{o}</Text>))}
+                </Animated.View>
+              }
+            </View>
         </View>
       )
     }
 };
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  contentContainer: {
+
+  },
+  textAlignFromStart: {
+    alignItems: 'flex-start',
+  },
+  textContainer: {
+    flexDirection: 'row',
+    width: null,
+  },
+  textContainerTail: {
+    position: 'absolute',
+    flexDirection: 'row',
+    width: null,
+  },
+
+});
+
 Marquee.propTypes = {
   children: PropTypes.string.isRequired,
   speed: PropTypes.number,
